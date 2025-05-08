@@ -191,9 +191,8 @@ ax_client.create_experiment(
         "value_type": "float",
     }, {
         "name": "Rs",
-        "type": "choice",
-        "values": [10000.0, 0.0001, 1e-06, 0.01, 100.0, 1000000.0, 100000000.0, 10000000000.0],
-        "is_ordered": True,
+        "type": "range",
+        "bounds": [1e-06, 10000000000.0],
         "value_type": "float",
     },  {
         "name": "Ar",
