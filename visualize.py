@@ -30,6 +30,7 @@ df = pd.DataFrame(random.sample(sample_dicts, 25))
 #df = pd.DataFrame(sample_dicts)
 fig = px.parallel_coordinates(df, color="distance_to_k_mean",
                              color_continuous_scale=px.colors.diverging.balance,
-                             color_continuous_midpoint=0.1)
+                             color_continuous_midpoint=0.1
+                             )
 fig.show()
 

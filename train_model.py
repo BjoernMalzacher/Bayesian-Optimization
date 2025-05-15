@@ -1,41 +1,26 @@
-from typing import Sequence
 import pandas as pd
 import numpy as np
-import torch
-import matplotlib.pyplot as plt
-from torch import Tensor
+
 import math
 import os
 
 from ax.service.ax_client import AxClient, ObjectiveProperties
-from ax.utils.notebook.plotting import render
-from ax.utils.report.render import render_report_elements
 from ax.modelbridge.generation_strategy import GenerationStep, GenerationStrategy
-from ax.modelbridge.registry import Models
-from ax.models.torch.botorch_modular.model import BoTorchModel
 from ax.models.torch.botorch_modular.surrogate import SurrogateSpec
 from ax.models.torch.botorch_modular.utils import ModelConfig
-from ax.plot.trace import optimization_trace_single_method
 from plotly.offline import plot
-from botorch.acquisition.acquisition import AcquisitionFunction
-from botorch.acquisition.input_constructors import acqf_input_constructor, MaybeDict
-from botorch.acquisition.logei import qLogExpectedImprovement, qLogNoisyExpectedImprovement
 from botorch.acquisition.analytic import UpperConfidenceBound, ProbabilityOfImprovement
 from botorch.models import SingleTaskGP
-from botorch.models.model import Model
-from botorch.utils.datasets import SupervisedDataset
-from ax.plot.contour import plot_contour
-from ax.plot.trace import optimization_trace_single_method
-import plotly.express as px
 import pandas as pd
 from ax.plot.contour import interact_contour
 import numpy as np
 import plotly.graph_objects as go
 from ax.plot.trace import optimization_trace_single_method_plotly
-from ax.modelbridge.factory import get_and_fit_model
-import functools
-from ax.plot.slice import plot_slice
+from ax.plot.slice import plot_slice, plot_slice_plotly
 from ax.plot.scatter import interact_fitted
+from ax.modelbridge.registry import Generators
+from ax.plot.diagnostic import interact_cross_validation
+from ax.modelbridge.cross_validation import cross_validate
 
 #-----------------------------Initialization-----------------------------------------------------------------------------------------
 # Read the CSV file
@@ -64,7 +49,8 @@ sample_dicts = [
 distance_list = []
 
 trials_count = 40
-random = 10
+random = 5
+alpha = 0
 
 #-----------------------------Functions-----------------------------------------------------------------------------------------
 # Assume you precompute these from your sample_dicts
@@ -96,8 +82,7 @@ def get_nearest_sample(candidate):
             (normalize(candidate['Kr'], "Kr") - normalize(sample["Kr"], "Kr"))**2 +
             (normalize(candidate['Rs'], "Rs") - normalize(sample["Rs"], "Rs"))**2 +
             (normalize(candidate['Ar'], "Ar") - normalize(sample["Ar"], "Ar"))**2 +
-            (normalize(candidate['Vf'], "Vf") - normalize(sample["Vf"], "Vf"))**2
-        )
+            (normalize(candidate['Vf'], "Vf") - normalize(sample["Vf"], "Vf"))**2)
         
         if distance < min_distance:
             min_distance = distance 
@@ -114,30 +99,26 @@ def get_nearest_sample(candidate):
 gs = GenerationStrategy(
     steps=[
         GenerationStep(  # Initialization step
-            model=Models.SOBOL,
+            model=Generators.SOBOL,
             num_trials=random,
             min_trials_observed=5,
         ),
         GenerationStep(  # BayesOpt step
-            model=Models.BOTORCH_MODULAR,
+            model=Generators.BOTORCH_MODULAR,
             # No limit on how many generator runs will be produced
-            num_trials=math.ceil((trials_count-random)/2),
+            num_trials=math.ceil((trials_count-random)/2+alpha),
             model_kwargs={  # Kwargs to pass to `BoTorchModel.__init__`
                 "surrogate_spec": SurrogateSpec(
                     model_configs=[ModelConfig(botorch_model_class=SingleTaskGP)]
                 ),
                 "botorch_acqf_class": UpperConfidenceBound, #adjustable for exploration via  beta
-                
+                "acquisition_options": {"beta": 1.0  }
             },
-            model_gen_kwargs={
-        "acquisition_function_options": {
-            "beta": 10.0,  # Adjust this value for exploration
-                },
-            }
+
         ),
         GenerationStep(  # BayesOpt step
-            model=Models.BOTORCH_MODULAR,
-            num_trials=round((trials_count-random)/2),
+            model=Generators.BOTORCH_MODULAR,       
+            num_trials=round((trials_count-random)/2-alpha),
             model_kwargs={ 
                 "surrogate_spec": SurrogateSpec(
                     model_configs=[ModelConfig(botorch_model_class=SingleTaskGP)]
@@ -150,33 +131,7 @@ gs = GenerationStrategy(
 # multiple acqu fuc starting with 'exploration' later with 'exploitation' 
 
 #-----------------------------Experiment-----------------------------------------------------------------------------------------
-"""
-    [{
-        "name": "Kr",
-        "type": "choice",
-        "values": [5.0, 10.0, 15.0, 25.0,40.0,55.0,70.0,100.0],
-        "is_ordered": True,
-        "value_type": "float",
-    }, {
-        "name": "Rs",
-        "type": "choice",
-        "values": [10000.0, 0.0001, 1e-06, 0.01, 100.0, 1000000.0, 100000000.0, 10000000000.0],
-        "is_ordered": True,
-        "value_type": "float",
-    }, {
-        "name": "Ar",
-        "type": "choice",
-        "values": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        "is_ordered": True,
-        "value_type": "float",
-    }, {
-        "name": "Vf",
-        "type": "choice",
-        "values": [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0],
-        "is_ordered": True,
-        "value_type": "float",
-    }],
-"""
+
 
 # Create Ax experiment
 ax_client = AxClient(generation_strategy=gs)
@@ -186,9 +141,9 @@ ax_client.create_experiment(
     parameters=[{
         "name": "Kr",
         "type": "range",
-        "bounds": [5.0, 100.0],
+        "bounds": [5, 100],
 
-        "value_type": "float",
+        "value_type": "int",
     }, {
         "name": "Rs",
         "type": "range",
@@ -197,28 +152,26 @@ ax_client.create_experiment(
     },  {
         "name": "Ar",
         "type": "range",
-        "bounds": [1.0, 6.0],
+        "bounds": [1, 6],
 
-        "value_type": "float",
+        "value_type": "int",
     }, {
         "name": "Vf",
         "type": "range",
-        "bounds": [5.0,60.0],
+        "bounds": [5,60],
 
-        "value_type": "float",
+        "value_type": "int",
     }],
-    # not range but list type
 
 objectives={"k_mean": ObjectiveProperties(minimize=True)}
 )
 
-for i in range(trials_count):
+for _ in range(trials_count):
     params, trial_index = ax_client.get_next_trial()
     para = get_nearest_sample(params)
     trial = ax_client.get_trial(trial_index)
     save = para.copy() 
     del save["k_mean"]
-    gs = ax_client.generation_strategy
     trial.arm._parameters.update(save)
     ax_client.complete_trial(trial_index=trial_index, raw_data={"k_mean": ( para["k_mean"] , 0.0)})
 
@@ -230,6 +183,16 @@ aqc_func_name_list = ["ProbabilityOfImprovement", "UpperConfidenceBound beta = 1
     
 df = ax_client.get_trials_data_frame()
 df.to_csv("trials_data.csv", index=True)
+
+zipped_data = list(zip(
+    df['Kr'],
+    df['Rs'],
+    df['Ar'],
+    df['Vf'],
+    df['k_mean']
+))
+
+
 
 y_vals = df["k_mean"].values
 y = np.array([distance_list])  
@@ -260,24 +223,85 @@ for idx, model in strategy_changes:
     )
     fig.update_yaxes(tickformat=".1e")  # or ".2e", ".0e" depending on your precision needs
 
-fig.show()
 
+
+
+
+
+
+
+
+
+def calc_3d_plot(x_name = 'Ar', y_name = 'Vf'):
+    df = pd.read_csv('trials_data.csv')
+
+    x_coords = sorted(df[x_name].unique())
+    y_coords = sorted(df[y_name].unique())
+
+
+    pivot_df = df.pivot_table(index=y_name, columns=x_name, values='k_mean')
+    pivot_df = pivot_df.reindex(index=y_coords, columns=x_coords)
+    z_surface_data = pivot_df.values 
+
+
+
+    new_fig = go.Figure(data=[go.Surface(
+        x=x_coords,
+        y=y_coords,
+        z=z_surface_data,
+        colorscale='Viridis', 
+        colorbar=dict(title='k_mean'),
+        contours={
+            "z": {
+                "show": True, "usecolormap": True, "highlightcolor": "limegreen", "project": {"z": True},
+            },
+            "x": {"show": True, "color": "rgba(100,100,100,0.5)", "project": {"x": True}}, 
+            "y": {"show": True, "color": "rgba(100,100,100,0.5)", "project": {"y": True}}, 
+        }
+    )])
+
+    new_fig.update_layout(
+        title=dict(text='k_mean vs '+x_name+' vs '+y_name, x=0.5),
+        autosize=True, 
+        width=800, height=600,
+        margin=dict(l=50, r=50, b=50, t=90), 
+        scene=dict(
+            xaxis_title=x_name, 
+            yaxis_title=y_name,
+            zaxis_title='k_mean (Permeability)',
+            aspectratio=dict(x=1, y=1, z=0.7), 
+            camera_eye=dict(x=1.2, y=1.2, z=0.6)
+        )
+    )
+    return new_fig
+
+
+
+#Unique Kr values:  [5.0, 10.0, 15.0, 25.0, 40.0, 55.0, 70.0, 100.0]
+#Unique Rs values:  [10000.0, 0.0001, 1e-06, 0.01, 100.0, 1000000.0, 100000000.0, 10000000000.0]
+#Unique Ar values:  
+#Unique Vf values:  
 # Get Ax figures (don't use render yet)
 ax_figs = [
-    fig,
     interact_fitted(model=ax_client.generation_strategy.model, rel=False),
-    interact_contour(model=ax_client.generation_strategy.model, metric_name="k_mean"),
-    plot_slice(model=ax_client.generation_strategy.model, metric_name="k_mean", param_name="Kr"),
-    plot_slice(model=ax_client.generation_strategy.model, metric_name="k_mean", param_name="Rs"),
-    plot_slice(model=ax_client.generation_strategy.model, metric_name="k_mean", param_name="Ar"),
-    plot_slice(model=ax_client.generation_strategy.model, metric_name="k_mean", param_name="Vf"),
+    interact_contour(model=ax_client.generation_strategy.model, metric_name="k_mean")
 ]
 figs = [go.Figure(fig.data) for fig in ax_figs]
 
 # Generate combined HTML using Plotly (Ax uses Plotly internally)
 html_parts = [
-    plot(fig, include_plotlyjs=i==0, output_type="div") for i, fig in enumerate(figs)
+    fig.to_html(), 
+    calc_3d_plot(x_name='Ar', y_name='Vf').to_html(), 
+    calc_3d_plot(x_name='Rs', y_name='Kr').to_html(),
+    calc_3d_plot(x_name='Vf', y_name='Kr').to_html(),
+    calc_3d_plot(x_name='Vf', y_name='Ar').to_html(),
+    ] 
+
+# Add the rest of the figures using list comprehension
+html_parts += [
+    plot(f, include_plotlyjs=(i == 0), output_type="div") for i, f in enumerate(figs)
 ]
+
 
 html_content = f"""
 <html>
@@ -297,11 +321,13 @@ os.system(r"/mnt/c/Program\ Files/Mozilla\ Firefox/firefox.exe ax_combined_repor
 
 
 
+
 # test diffrent visualization methods -
 # How to use plotly
 
 
 # task:
-# adding points to the slice plot
-#figure out the beta
-# testing with breakpoint
+# adding points to the slice plot 
+# seed testing beta -
+#figure out the beta -
+# change timing of exploration vs exploitation -
