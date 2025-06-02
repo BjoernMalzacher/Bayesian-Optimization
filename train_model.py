@@ -232,48 +232,6 @@ for idx, model in strategy_changes:
 
 
 
-def calc_3d_plot(x_name = 'Ar', y_name = 'Vf'):
-    df = pd.read_csv('trials_data.csv')
-
-    x_coords = sorted(df[x_name].unique())
-    y_coords = sorted(df[y_name].unique())
-
-
-    pivot_df = df.pivot_table(index=y_name, columns=x_name, values='k_mean')
-    pivot_df = pivot_df.reindex(index=y_coords, columns=x_coords)
-    z_surface_data = pivot_df.values 
-
-
-
-    new_fig = go.Figure(data=[go.Surface(
-        x=x_coords,
-        y=y_coords,
-        z=z_surface_data,
-        colorscale='Viridis', 
-        colorbar=dict(title='k_mean'),
-        contours={
-            "z": {
-                "show": True, "usecolormap": True, "highlightcolor": "limegreen", "project": {"z": True},
-            },
-            "x": {"show": True, "color": "rgba(100,100,100,0.5)", "project": {"x": True}}, 
-            "y": {"show": True, "color": "rgba(100,100,100,0.5)", "project": {"y": True}}, 
-        }
-    )])
-
-    new_fig.update_layout(
-        title=dict(text='k_mean vs '+x_name+' vs '+y_name, x=0.5),
-        autosize=True, 
-        width=800, height=600,
-        margin=dict(l=50, r=50, b=50, t=90), 
-        scene=dict(
-            xaxis_title=x_name, 
-            yaxis_title=y_name,
-            zaxis_title='k_mean (Permeability)',
-            aspectratio=dict(x=1, y=1, z=0.7), 
-            camera_eye=dict(x=1.2, y=1.2, z=0.6)
-        )
-    )
-    return new_fig
 
 
 
@@ -289,13 +247,6 @@ ax_figs = [
 figs = [go.Figure(fig.data) for fig in ax_figs]
 
 # Generate combined HTML using Plotly (Ax uses Plotly internally)
-html_parts = [
-    fig.to_html(), 
-    calc_3d_plot(x_name='Ar', y_name='Vf').to_html(), 
-    calc_3d_plot(x_name='Rs', y_name='Kr').to_html(),
-    calc_3d_plot(x_name='Vf', y_name='Kr').to_html(),
-    calc_3d_plot(x_name='Vf', y_name='Ar').to_html(),
-    ] 
 
 # Add the rest of the figures using list comprehension
 html_parts += [

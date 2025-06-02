@@ -16,6 +16,8 @@ from ax.generation_strategy.generation_node import GenerationNode
 from ax.generation_strategy.model_spec import GeneratorSpec
 from ax.modelbridge.registry import Generators
 from ax.generation_strategy.generation_strategy import GenerationStrategy
+from ax.plot.trace import optimization_trace_single_method_plotly
+import os
 
 df = pd.read_csv("homogen_thermalcond_dataset.csv")
 df_cleaned = df.dropna(subset=['Kr','Rs','Ar','Vf (%)','k_mean'])
@@ -37,7 +39,7 @@ sample_dicts = [
     }
     for kr, rs, ar, vf, k_mean in zipped_data
 ]
-
+min_value = min([sample["k_mean"] for sample in sample_dicts])
 distance_list = []
 
 maxvalues = {
@@ -60,7 +62,7 @@ def normalize(x, key):
 def get_nearest_sample(candidate):
     nearest_sample = None
     min_distance = float('inf')
-    
+    print("Candidate:", candidate)
     for sample in sample_dicts:
         # Distance calculation based on Kr, Rs, Ar, and Vf
         distance = np.sqrt(
@@ -75,144 +77,140 @@ def get_nearest_sample(candidate):
             nearest_sample = sample
     sample_dicts.remove(nearest_sample)
     distance_list.append(min_distance)  # distance in the search speace not in the solution space
-    print("Candidate:", candidate)
+
     print("Nearest Sample:", nearest_sample)
     return nearest_sample
 
+trial_count =120 
+random_count = 24
+alpha = 40
+UpperConfidence_count = trial_count/2 + alpha
+from ax.core.trial import Trial
+from pyre_extensions import assert_is_instance
+import datetime
+trials = 5
 
+for n in range(trials):
+    ProbabilityOfImp = GenerationNode(
+                node_name="ProbabilityOfImp",
+                model_specs=[
+                    GeneratorSpec(
+                        model_enum=Generators.BOTORCH_MODULAR,
+                        model_kwargs={
+                            "botorch_acqf_class": ProbabilityOfImprovement,
+                            "acquisition_options": {},
+                        },  
+                    ),
+                ],
+            )
 
+    UpperConfidence = GenerationNode(
+                node_name="UpperConfidence",
+                model_specs=[
+                    GeneratorSpec(
+                        model_enum=Generators.BOTORCH_MODULAR,
+                        model_kwargs={
+                            "botorch_acqf_class": UpperConfidenceBound,
+                        "acquisition_options": {   "beta": 16.0},
+                        },
+                    ),
+                ],
+                transition_criteria=[
+                MinTrials(
+                    threshold=UpperConfidence_count,
+                    transition_to=ProbabilityOfImp.node_name,
+                    use_all_trials_in_exp=True,
+                )  
+                ]
+            )
 
-ProbabilityOfImp = GenerationNode(
-            node_name="ProbabilityOfImp",
+    sobol = GenerationNode(
+            node_name="Sobol",
             model_specs=[
                 GeneratorSpec(
-                    model_enum=Generators.BOTORCH_MODULAR,
-                    model_kwargs={
-                        "botorch_acqf_class": ProbabilityOfImprovement,
-                        "acquisition_options": {},
-                    },  
-                ),
-            ],
-        )
-
-UpperConfidence = GenerationNode(
-            node_name="UpperConfidence",
-            model_specs=[
-                GeneratorSpec(
-                    model_enum=Generators.BOTORCH_MODULAR,
-                    model_kwargs={
-                        "botorch_acqf_class": UpperConfidenceBound,
-                    "acquisition_options": {   "beta": 10.0},
-                    },
+                    model_enum=Generators.SOBOL,
                 ),
             ],
             transition_criteria=[
-            MinTrials(
-                threshold=15,
-                transition_to=ProbabilityOfImp.node_name,
-                use_all_trials_in_exp=True,
-            )  
+                # Transition to BoTorch node once there are 5 trials on the experiment.
+                MinTrials(
+                    threshold=random_count,
+                    transition_to=UpperConfidence.node_name,
+                    use_all_trials_in_exp=True,
+                )
             ]
         )
 
-sobol = GenerationNode(
-        node_name="Sobol",
-        model_specs=[
-            GeneratorSpec(
-                model_enum=Generators.SOBOL,
-                model_kwargs={"seed": 0},
-            ),
-        ],
-        transition_criteria=[
-            # Transition to BoTorch node once there are 5 trials on the experiment.
-            MinTrials(
-                threshold=5,
-                transition_to=UpperConfidence.node_name,
-                use_all_trials_in_exp=True,
-            )
-        ]
+
+
+    gs = GenerationStrategy(
+        name= "Custom Generation Strategy",
+        nodes=[sobol, UpperConfidence, ProbabilityOfImp])
+
+    Kr = ChoiceParameterConfig(
+        name="Kr",
+        values=[5.0, 10.0, 15.0, 25.0,40.0,55.0,70.0,100.0],
+        is_ordered=True,
+        parameter_type="float",
+    )
+    Rs = ChoiceParameterConfig(
+        name="Rs",
+        values= [10000.0, 0.0001, 1e-06, 0.01, 100.0, 1000000.0, 100000000.0, 10000000000.0],
+        is_ordered=True,
+        parameter_type="float",
+    )
+    Ar = ChoiceParameterConfig(
+        name="Ar",
+        values=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        is_ordered=True,
+        parameter_type="float",
+    )
+    Vf = ChoiceParameterConfig(
+        name="Vf",
+        values=[5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0],
+        is_ordered=True,
+        parameter_type="float",
+        
     )
 
 
 
-gs = GenerationStrategy(
-    name= "Custom Generation Strategy",
-    nodes=[sobol, UpperConfidence, ProbabilityOfImp],)
-
-
-client = Client(random_seed=1)
-
-Kr = ChoiceParameterConfig(
-    name="Kr",
-    values=[5.0, 10.0, 15.0, 25.0,40.0,55.0,70.0,100.0],
-    is_ordered=True,
-    parameter_type="float",
-)
-Rs = ChoiceParameterConfig(
-    name="Rs",
-    values= [10000.0, 0.0001, 1e-06, 0.01, 100.0, 1000000.0, 100000000.0, 10000000000.0],
-    is_ordered=True,
-    parameter_type="float",
-)
-Ar = ChoiceParameterConfig(
-    name="Ar",
-    values=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-    is_ordered=True,
-    parameter_type="float",
-)
-Vf = ChoiceParameterConfig(
-    name="Vf",
-    values=[5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0],
-    is_ordered=True,
-    parameter_type="float",
-    
-)
-
-client.configure_experiment( 
+    client = Client()
+    client.configure_experiment( 
     name="k_mean_optimization",
     parameters=[Kr,Rs,Ar,Vf],
 
-)
-metric_name = "k_mean"  # this name is used during the optimization loop
-objective = f"-{metric_name}"  # minimization is specified by the negative sign
+    )
+    metric_name = "k_mean"  # this name is used during the optimization loop
+    objective = f"-{metric_name}"  # minimization is specified by the negative sign
 
-client.configure_optimization(objective=objective)
+    client.configure_optimization(objective=objective)
+    client.set_generation_strategy(
+        generation_strategy=gs,
+    )
+    thrashhold = 0
+    for i in range(trial_count):
+        
+        print("Iteration:", i)
+        trial_index, parameters = client.get_next_trials(max_trials=1).popitem()
+        near_sample = get_nearest_sample(parameters)
+        save = near_sample.copy()
+        del save["k_mean"]
+        parameters = save.copy()    
+        trial = assert_is_instance(client._experiment.trials[trial_index], Trial)
+        trial.arm._parameters.update(save)
+        client.complete_trial(trial_index= trial_index, raw_data={"k_mean": ( near_sample["k_mean"] , 0.0)})
+        
+        if (abs(near_sample['k_mean']-min_value))<= thrashhold and trial.generation_method_str != 'Sobol':
+            print(abs(near_sample['k_mean']-min_value))
+            trial_count = i
+            break;
+    
+    
+    
+    df =  client.summarize()
+    path = "./output/trial_data_"+ datetime.datetime.now().ctime() +"__"+  str(trial_count) +".csv"
+    df.to_csv(path, index=True)
+    
+    
 
-#client.set_generation_strategy(generation_strategy=gs)   
-
-
-samples = random.sample(sample_dicts, 10)
-preexisting_trials = samples
-
-for trial in preexisting_trials:
-    save = trial.copy()
-    del save["k_mean"]
-    print(save)
-    trial_index = client.attach_trial(parameters=save)
-    client.complete_trial(trial_index=trial_index, raw_data={"k_mean": ( trial["k_mean"] , 0.0)})
-
-
-for i in range(30):
-    print("Iteration:", i)
-    trial = client.get_next_trials(max_trials=1)
-    trial_index, parameters = list(trial.items())[0]
-    near_sample = get_nearest_sample(parameters)
-    client.complete_trial(trial_index= trial_index, raw_data={"k_mean": ( near_sample["k_mean"] , 0.0)})
-
-
-best_parameters, prediction, index, name = client.get_best_parameterization()
-print("Best Parameters:", best_parameters)
-print("Prediction (mean, variance):", prediction)
-
-# display=True instructs Ax to sort then render the resulting analyses
-cards = client.compute_analyses(
-    display=True)
-import os
-page =""
-for card in cards:
-    page += card._body_html()
-with open("ax_combined_report.html", "w") as f:
-    f.write(page)
-
-# Open in Windows Firefox (from WSL)
-os.system(r"/mnt/c/Program\ Files/Mozilla\ Firefox/firefox.exe ax_combined_report.html")
