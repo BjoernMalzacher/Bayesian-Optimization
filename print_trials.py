@@ -18,11 +18,15 @@ from ax.modelbridge.registry import Generators
 from ax.generation_strategy.generation_strategy import GenerationStrategy
 from ax.plot.trace import optimization_trace_single_method_plotly
 import os
+import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-
+import matplotlib.pyplot as plt
+import numpy as np
+import base64
+from io import BytesIO
 
 
 directory_path = "output" 
@@ -56,10 +60,30 @@ for df in df_list:
     figs = []
 
     # Loop through the combinations and create contour plots
-    for x_param, y_param, z_param in combinations:
+    '''for (x_param, y_param, z_param) in combinations:
         fig = px.density_contour(df, x=x_param, y=y_param, z=z_param)
-        fig.update_traces(contours_coloring="fill", contours_showlabels=True)
-        figs.append(fig)
+        fig.update_traces(contours_coloring="fill", contours_showlabels=True)  # Disable legend for individual plots
+        figs.append(fig)'''
+
+    for (x_param, y_param, z_param) in combinations:
+
+        # Erstelle ein go.Figure-Objekt
+        fig = go.Figure(data=[go.Contour(
+            x=df[x_param],
+            y=df[y_param],
+            z=df[z_param],
+            colorscale='Viridis_r',  # Oder eine andere Farbskala deiner Wahl
+            contours_coloring='fill', # Konturen füllen
+            colorbar=dict(title=z_param) # Legendentitel setzen
+        )])
+        fig.update_layout(
+            title=f'Konturplot von {z_param} über {x_param} und {y_param}',
+            xaxis_title=x_param,
+            yaxis_title=y_param
+        )
+
+        #figs.append(fig)
+
 
     # Create the main figure
     main_fig = go.Figure()
@@ -102,16 +126,93 @@ for df in df_list:
 
     # Create a single HTML file to hold all figures
     combined_html = main_fig.to_html(full_html=False)  # Start with the main figure's HTML
+    
+    
     combined_html += parallel_fig.to_html(full_html=False)  
     # Append each contour figure's HTML to the combined HTML
     for fig in figs:
         combined_html += fig.to_html(full_html=False)
 
-    # Save the combined HTML to a single file
+ 
+
+
+
+    iteration_id = df['trial_index'] # iteration number (x)
+    score = df['k_mean'] # metric, K_mean for you (y)
+    
+    
+    # Plot
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Compute the cumulative minimum
+    cum_min = np.minimum.accumulate(score)
+
+    # Plot the actual current score(/K_mean) -- in light grey, in the background
+    ax.plot(iteration_id, score, 'o-', color='#cccccc', alpha=0.6, label='K_mean')
+
+    # Plot the convergence curve (cumulative minimum error) -- overall min at each iteration
+    ax.plot(iteration_id, cum_min, linestyle='-', label='Cumulative minimum error', color='tab:blue')
+
+    # Plot threshold
+    y_target = 0
+    threshold = 0.03
+    ax.fill_between(iteration_id, y_target, y_target + threshold, color='C1', alpha=0.15, label="Threshold")
+    
+    # Add a vertical line at a specific iteration (e.g., iteration 15)
+        # Identify where generation_node changes
+    change_indices = df.index[df['generation_node'] != df['generation_node'].shift()].tolist()
+
+    # Add vertical lines at the change points
+    for index in change_indices:    
+        ax.axvline(x=index, color='red', linestyle='--', label=df['generation_node'][index])
+
+    # Labels
+    ax.set_ylabel('Error', fontsize=12)
+    ax.set_xlabel('Iteration', fontsize=12)
+    # Customize ticks
+    ax.set_xticks(iteration_id)
+
+    # To hide some of the tick labels in case it gets too messy
+    for index, label in enumerate(ax.xaxis.get_ticklabels()):
+        if index % 5 != 0:
+            label.set_visible(False)
+
+    # Customizable figure size
+    plt.rcParams["figure.figsize"] = [7, 5]
+    fig.subplots_adjust(hspace=0.3)
+
+    # Highlight best iteration
+    highlight_idx = df['k_mean'].idxmin()
+
+    ax.plot(iteration_id[highlight_idx], cum_min[highlight_idx],
+            marker='o', markersize=8, color='#39e75f', alpha=0.6, linestyle='None', zorder=5, label="Best result")
+
+    # Optional legend (can be enabled if space allows)
+    ax.legend(loc='best', frameon=False)
+
+    #plt.title('Overview Bayesian Oracle Search') # default exploration/exploitation rate: 2.6
+    #plt.savefig('/path/to/folder/method_convergence.pdf', dpi=300, bbox_inches='tight')
+    # Convert the figure to a base64 string
+    def figure_to_base64(fig):
+        img = BytesIO()
+        fig.savefig(img, format='png')
+        img.seek(0)
+        return base64.b64encode(img.getvalue()).decode('utf-8')
+
+    # Get the base64 string
+    base64_image = figure_to_base64(fig)
+
+    # Create the HTML string
+    combined_html += f'<img src="data:image/png;base64,{base64_image}" />'
+    
+
+
+       # Save the combined HTML to a single file
     with open(combined_html_file, 'w') as f:
         f.write(combined_html)
         
     html_pages.append(combined_html_file)
+
 
 average_min_k_mean = np.mean(min_values)
 dist_list = []
@@ -123,6 +224,7 @@ print("absolute min:",absolute_min)
 for minval in min_values:
     dist_list.append(abs(absolute_min-min_values ))
 print('Avg distance:',np.mean(dist_list))
+print('Avg median:', np.median(dist_list))
 # Create the command to open all files in new tabs
 command = f'"/mnt/c/Program Files/Mozilla Firefox/firefox.exe" -new-tab ' + ' '.join(f'"{file}"' for file in html_pages)
 # Execute the command
