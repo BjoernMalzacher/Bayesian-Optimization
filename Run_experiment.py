@@ -2,7 +2,7 @@ from ax.api.client import Client
 from ax.api.configs import ChoiceParameterConfig
 import pandas as pd
 import numpy as np
-from botorch.acquisition.analytic import UpperConfidenceBound, ProbabilityOfImprovement,PosteriorStandardDeviation,qAnalyticProbabilityOfImprovement
+from botorch.acquisition.analytic import UpperConfidenceBound, ProbabilityOfImprovement,LogExpectedImprovement
 
 from ax.generation_strategy.transition_criterion import MinTrials
 from ax.generation_strategy.generation_node import GenerationNode
@@ -249,6 +249,25 @@ for n in range(trials):
         )
     ],
             )
+    
+    ExpectedImp = GenerationNode(
+        
+                node_name="LogExpectedImprovement",
+                model_specs=[
+                    GeneratorSpec(
+                        model_enum=Generators.BOTORCH_MODULAR,
+                        model_kwargs={
+                            "botorch_acqf_class": LogExpectedImprovement,
+                        },  
+                    ),
+                ],
+                transition_criteria=[
+        PostTransitionTrialsCriterion(
+            num_trials=120,
+            transition_to="LogExpectedImprovement"
+        )
+    ],
+            )
     UpperConfidence = GenerationNode(
                 node_name="UpperConfidence",
                 model_specs=[
@@ -256,16 +275,15 @@ for n in range(trials):
                         model_enum=Generators.BOTORCH_MODULAR,
                         model_kwargs={
                             "botorch_acqf_class": UpperConfidenceBound,
-                            "acquisition_options": {   "beta":2.6},
+                            "acquisition_options": {   "beta":0.5},
                         },
                     ),
                 ],
                 transition_criteria=[
-                       KMeanThresholdCriterion(
-                        k_mean_threshold=thrashhold,
-                        transition_to=ProbabilityOfImp.node_name,
-                        threshhold_count= 2
-                    ),
+                   PostTransitionTrialsCriterion(
+            num_trials=120,
+            transition_to="UpperConfidence"
+        )
                 ],
             )
 
@@ -280,7 +298,7 @@ for n in range(trials):
                 # Transition to BoTorch node once there are 5 trials on the experiment.
                 MinTrials(
                     threshold=random_count,
-                    transition_to=ProbabilityOfImp.node_name,
+                    transition_to=UpperConfidence.node_name,
                     use_all_trials_in_exp=True,
                 )
             ]
@@ -289,7 +307,7 @@ for n in range(trials):
 
 
     gs = GenerationStrategy(
-        nodes=[sobol, ProbabilityOfImp])
+        nodes=[sobol, UpperConfidence])
 
     Kr = ChoiceParameterConfig(
         name="Kr",
@@ -320,7 +338,7 @@ for n in range(trials):
 
 
 
-    client = Client(random_seed=random.randint(1,1000))
+    client = Client()
     client.configure_experiment( 
     name="k_mean_optimization",
     parameters=[Kr,Rs,Ar,Vf],
@@ -328,12 +346,12 @@ for n in range(trials):
     )
     metric_name = "k_mean"  # this name is used during the optimization loop
     objective = f"-{metric_name}"  # minimization is specified by the negative sign
-    threshold = 0.012
+    threshold = 0.015
     client.configure_optimization(objective=objective )
     client.set_generation_strategy(
         generation_strategy=gs,
     )
-    trial_count = 1000
+    trial_count = 120
     for i in range(trial_count):
         
         print("Iteration:", i)
@@ -345,7 +363,7 @@ for n in range(trials):
         trial = assert_is_instance(client._experiment.trials[trial_index], Trial)
         trial.arm._parameters.update(save)
         client.complete_trial(trial_index= trial_index, raw_data={"k_mean": ( near_sample["k_mean"] , 0.0)})
-        if(near_sample["k_mean"] <= threshold and client._generation_strategy._curr.node_name ==ProbabilityOfImp.node_name):
+        if(near_sample["k_mean"] <= threshold and client._generation_strategy._curr.node_name !=sobol.node_name):
             print("threshold reached:", near_sample["k_mean"])
             trial_count = i
             break
