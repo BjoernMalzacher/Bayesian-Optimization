@@ -36,12 +36,12 @@ def printCompEq(list):
         
         if len(aq_func) == 2 and 'Sobol' in aq_func:
                 # Extract the 'searched value' using set difference
-            searched_value = (aq_func - {'sobol'}).pop()
+            searched_value = (aq_func - {'Sobol'}).pop()
             
             print(searched_value)
         ax.plot(iterations, mean_k_mean, 'o-', label=searched_value)
       
-    ax.set_title('Average Convergence with Confidence Interval')
+    ax.set_title('Acquisition Function Performance Comparison')
     ax.set_xlabel('Iteration')
     ax.set_ylabel('k_mean')
     ax.legend()
@@ -75,17 +75,18 @@ def loadlist(directory_path):
     return df_list
 
 directory_path_expImp = "output_expImp_0.015"  # Adjusted directory paths for clarity
-directory_path_Upper = "output_UpperConfidence_0.015"
 directory_path_PropOfImp = "output_PropImp_0.015"
-
+directory_path_Upper_low = "output_UpperConfidance_0.1_0.015"
+directory_path_Upper_high = "output_UpperConfidence_0.5_0.015"
 
 
 df_list_expImp = loadlist(directory_path_expImp)
-df_list_Upper = loadlist(directory_path_Upper)
+#df_list_Upper_low = loadlist(directory_path_Upper_low)
+df_list_Upper_high = loadlist(directory_path_Upper_high)
 df_list_PropOfImp = loadlist(directory_path_PropOfImp)
-
+#print(df_list_Upper_high)
 print(df for df in df_list_expImp)
-comb_list = [df_list_expImp, df_list_Upper, df_list_PropOfImp]
+comb_list = [df_list_expImp, df_list_Upper_high, df_list_PropOfImp]
 
 
 os.makedirs("html", exist_ok=True)

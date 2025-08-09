@@ -275,7 +275,7 @@ for n in range(trials):
                         model_enum=Generators.BOTORCH_MODULAR,
                         model_kwargs={
                             "botorch_acqf_class": UpperConfidenceBound,
-                            "acquisition_options": {   "beta":0.5},
+                            "acquisition_options": {   "beta":0.1},
                         },
                     ),
                 ],
